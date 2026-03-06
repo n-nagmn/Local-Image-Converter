@@ -268,6 +268,7 @@
                         <option value="image/x-icon">ICO</option>
                         <option value="image/gif">GIF</option>
                         <option value="application/pdf">PDF</option>
+                        <option value="application/postscript">EPS</option>
                     </select>
                 </div>
                 <div class="setting-group">
@@ -464,6 +465,7 @@
                         <option value="image/x-icon" ${data.targetFormat === 'image/x-icon' ? 'selected' : ''}>ICO</option>
                         <option value="image/gif" ${data.targetFormat === 'image/gif' ? 'selected' : ''}>GIF</option>
                         <option value="application/pdf" ${data.targetFormat === 'application/pdf' ? 'selected' : ''}>PDF</option>
+                        <option value="application/postscript" ${data.targetFormat === 'application/postscript' ? 'selected' : ''}>EPS</option>
                     </select>
                     <div style="width: 120px; text-align: center;">${statusHtml}</div>
                     <div class="file-size">${formatBytes(data.file.size)}</div>
@@ -547,6 +549,52 @@
             });
         }
 
+        function encodeEPS(canvas) {
+            const width = canvas.width;
+            const height = canvas.height;
+            const ctx = canvas.getContext('2d');
+            const imgData = ctx.getImageData(0, 0, width, height).data;
+
+            let eps = "%!PS-Adobe-3.0 EPSF-3.0\n";
+            eps += `%%BoundingBox: 0 0 ${width} ${height}\n`;
+            eps += "%%LanguageLevel: 2\n";
+            eps += "%%EndComments\n";
+            eps += "gsave\n";
+            eps += `${width} ${height} scale\n`;
+            eps += "/DeviceRGB setcolorspace\n";
+            eps += "<<\n";
+            eps += "  /ImageType 1\n";
+            eps += `  /Width ${width}\n`;
+            eps += `  /Height ${height}\n`;
+            eps += "  /BitsPerComponent 8\n";
+            eps += "  /Decode [0 1 0 1 0 1]\n";
+            eps += `  /ImageMatrix [${width} 0 0 -${height} 0 ${height}]\n`;
+            eps += "  /DataSource currentfile /ASCIIHexDecode filter\n";
+            eps += ">>\n";
+            eps += "image\n";
+
+            const hexArray = [];
+            let currentLine = "";
+            for (let i = 0; i < imgData.length; i += 4) {
+                currentLine += imgData[i].toString(16).padStart(2, '0') +
+                               imgData[i+1].toString(16).padStart(2, '0') +
+                               imgData[i+2].toString(16).padStart(2, '0');
+                if (currentLine.length >= 72) {
+                    hexArray.push(currentLine);
+                    currentLine = "";
+                }
+            }
+            if (currentLine.length > 0) {
+                hexArray.push(currentLine);
+            }
+
+            eps += hexArray.join("\n") + "\n>\n";
+            eps += "grestore\n";
+            eps += "%%EOF\n";
+
+            return new Blob([eps], { type: "application/postscript" });
+        }
+
         function getExtension(mimeType) {
             const map = {
                 'image/jpeg': 'jpg',
@@ -556,7 +604,8 @@
                 'image/bmp': 'bmp',
                 'image/x-icon': 'ico',
                 'image/gif': 'gif',
-                'application/pdf': 'pdf'
+                'application/pdf': 'pdf',
+                'application/postscript': 'eps'
             };
             return map[mimeType] || 'png';
         }
@@ -605,7 +654,7 @@
                             canvas.height = targetHeight;
                             const ctx = canvas.getContext('2d');
 
-                            if (['image/jpeg', 'image/bmp', 'application/pdf'].includes(data.targetFormat)) {
+                            if (['image/jpeg', 'image/bmp', 'application/pdf', 'application/postscript'].includes(data.targetFormat)) {
                                 ctx.fillStyle = '#FFFFFF';
                                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                             }
@@ -626,6 +675,8 @@
                                 finalize(encodeBMP(canvas));
                             } else if (data.targetFormat === 'image/x-icon') {
                                 finalize(await encodeICO(canvas));
+                            } else if (data.targetFormat === 'application/postscript') {
+                                finalize(encodeEPS(canvas));
                             } else if (data.targetFormat === 'application/pdf') {
                                 const { jsPDF } = window.jspdf;
                                 const pdf = new jsPDF({
