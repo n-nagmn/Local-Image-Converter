@@ -261,6 +261,7 @@
                     <select id="globalFormat" onchange="changeAllFormats(this.value)" class="format-select">
                         <option value="">個別設定のまま</option>
                         <option value="image/jpeg">JPG</option>
+                        <option value="image/jpeg_ext">JPEG</option>
                         <option value="image/png">PNG</option>
                         <option value="image/webp">WEBP</option>
                         <option value="image/avif">AVIF</option>
@@ -458,6 +459,7 @@
                     <div class="file-to-text">に</div>
                     <select class="format-select" onchange="updateFileFormat('${data.id}', this.value)" ${data.status !== 'ready' ? 'disabled' : ''}>
                         <option value="image/jpeg" ${data.targetFormat === 'image/jpeg' ? 'selected' : ''}>JPG</option>
+                        <option value="image/jpeg_ext" ${data.targetFormat === 'image/jpeg_ext' ? 'selected' : ''}>JPEG</option>
                         <option value="image/png" ${data.targetFormat === 'image/png' ? 'selected' : ''}>PNG</option>
                         <option value="image/webp" ${data.targetFormat === 'image/webp' ? 'selected' : ''}>WEBP</option>
                         <option value="image/avif" ${data.targetFormat === 'image/avif' ? 'selected' : ''}>AVIF</option>
@@ -598,6 +600,7 @@
         function getExtension(mimeType) {
             const map = {
                 'image/jpeg': 'jpg',
+                'image/jpeg_ext': 'jpeg',
                 'image/png': 'png',
                 'image/webp': 'webp',
                 'image/avif': 'avif',
@@ -654,7 +657,7 @@
                             canvas.height = targetHeight;
                             const ctx = canvas.getContext('2d');
 
-                            if (['image/jpeg', 'image/bmp', 'application/pdf', 'application/postscript'].includes(data.targetFormat)) {
+                            if (['image/jpeg', 'image/jpeg_ext', 'image/bmp', 'application/pdf', 'application/postscript'].includes(data.targetFormat)) {
                                 ctx.fillStyle = '#FFFFFF';
                                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                             }
@@ -688,7 +691,8 @@
                                 pdf.addImage(imgData, 'JPEG', 0, 0, targetWidth, targetHeight);
                                 finalize(pdf.output('blob'));
                             } else {
-                                canvas.toBlob(blob => finalize(blob), data.targetFormat, qualityValue);
+                                const exportFormat = data.targetFormat === 'image/jpeg_ext' ? 'image/jpeg' : data.targetFormat;
+                                canvas.toBlob(blob => finalize(blob), exportFormat, qualityValue);
                             }
                         };
                         img.onerror = reject;
