@@ -318,19 +318,33 @@
             qualityDisplay.textContent = e.target.value;
         });
 
-        emptyState.addEventListener('dragover', e => {
+        window.addEventListener('dragenter', e => {
             e.preventDefault();
-            emptyState.style.backgroundColor = '#f0f0f0';
         });
 
-        emptyState.addEventListener('dragleave', () => {
-            emptyState.style.backgroundColor = '#fafafa';
+        window.addEventListener('dragover', e => {
+            e.preventDefault();
+            if (emptyState.style.display !== 'none') {
+                emptyState.style.backgroundColor = '#f0f0f0';
+            }
         });
 
-        emptyState.addEventListener('drop', e => {
+        window.addEventListener('dragleave', e => {
             e.preventDefault();
-            emptyState.style.backgroundColor = '#fafafa';
-            handleFiles(e.dataTransfer.files);
+            if (emptyState.style.display !== 'none') {
+                emptyState.style.backgroundColor = '#fafafa';
+            }
+        });
+
+        window.addEventListener('drop', e => {
+            e.preventDefault();
+            if (emptyState.style.display !== 'none') {
+                emptyState.style.backgroundColor = '#fafafa';
+            }
+            
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFiles(e.dataTransfer.files);
+            }
         });
 
         fileInput.addEventListener('change', e => {
