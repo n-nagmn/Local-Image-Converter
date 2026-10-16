@@ -314,6 +314,20 @@
 
         let filesData = [];
 
+        function esc(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        const IMAGE_EXTENSIONS = /\.(jpe?g|png|webp|avif|bmp|gif|ico|heic|heif|tiff?|svg)$/i;
+
+        function isImageFile(file) {
+            return (file.type && file.type.startsWith('image/')) || IMAGE_EXTENSIONS.test(file.name);
+        }
+
         qualityRange.addEventListener('input', e => {
             qualityDisplay.textContent = e.target.value;
         });
@@ -343,7 +357,12 @@
             }
             
             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                handleFiles(e.dataTransfer.files);
+                const files = Array.from(e.dataTransfer.files);
+                const images = files.filter(isImageFile);
+                if (images.length < files.length) {
+                    alert('イメージ以外のファイルは対象外のため無視しました');
+                }
+                handleFiles(images);
             }
         });
 
@@ -373,6 +392,7 @@
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(a.href), 10000);
             } catch (err) {
                 console.error(err);
                 alert("ZIP生成に失敗しました");
@@ -383,7 +403,7 @@
         });
 
         function formatBytes(bytes) {
-            if (bytes === 0) return '0 KB';
+            if (bytes === 0) return '0 Bytes';
             const k = 1024;
             const sizes = ['Bytes', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -396,7 +416,12 @@
             emptyState.style.display = 'none';
             fileListContainer.style.display = 'flex';
 
+            const skippedEmpty = [];
             Array.from(newFiles).forEach(file => {
+                if (file.size === 0) {
+                    skippedEmpty.push(file.name);
+                    return;
+                }
                 const id = 'f_' + Math.random().toString(36).substr(2, 9);
                 let thumbUrl = '';
                 if(file.type.startsWith('image/')) {
@@ -413,6 +438,10 @@
                     thumbUrl: thumbUrl
                 });
             });
+
+            if (skippedEmpty.length > 0) {
+                alert('0バイトのファイルは無視しました: ' + skippedEmpty.join(', '));
+            }
 
             renderFileList();
         }
@@ -458,10 +487,10 @@
                 } else if (data.status === 'converting') {
                     statusHtml = '<span class="status-badge processing">処理中...</span>';
                 } else if (data.status === 'done') {
-                    statusHtml = `<a href="${data.downloadUrl}" download="${data.downloadName}" class="status-badge done">ダウンロード</a>`;
+                    statusHtml = `<a href="${esc(data.downloadUrl)}" download="${esc(data.downloadName)}" class="status-badge done">ダウンロード</a>`;
                     hasDoneFiles = true;
                 } else if (data.status === 'error') {
-                    statusHtml = '<span class="status-badge error">エラー</span>';
+                    statusHtml = `<span class="status-badge error" title="${esc(data.errorMsg || '不明なエラー')}">エラー</span>`;
                 }
 
                 const thumbStyle = data.thumbUrl ? `background-image: url('${data.thumbUrl}');` : '';
@@ -469,7 +498,7 @@
 
                 item.innerHTML = `
                     <div class="file-icon-box" style="${thumbStyle}">${thumbContent}</div>
-                    <div class="file-name" title="${data.file.name}">${data.file.name}</div>
+                    <div class="file-name" title="${esc(data.file.name)}">${esc(data.file.name)}</div>
                     <div class="file-to-text">に</div>
                     <select class="format-select" onchange="updateFileFormat('${data.id}', this.value)" ${data.status !== 'ready' ? 'disabled' : ''}>
                         <option value="image/jpeg" ${data.targetFormat === 'image/jpeg' ? 'selected' : ''}>JPG</option>
@@ -540,8 +569,12 @@
                 tempCanvas.getContext('2d').drawImage(canvas, 0, 0, width, height);
                 canvas = tempCanvas;
             }
-            return new Promise(resolve => {
+            return new Promise((resolve, reject) => {
                 canvas.toBlob(blob => {
+                    if (!blob) {
+                        reject(new Error('ICOエンコードに失敗しました'));
+                        return;
+                    }
                     blob.arrayBuffer().then(buffer => {
                         const pngData = new Uint8Array(buffer);
                         const icoSize = 22 + pngData.length;
@@ -571,44 +604,46 @@
             const ctx = canvas.getContext('2d');
             const imgData = ctx.getImageData(0, 0, width, height).data;
 
-            let eps = "%!PS-Adobe-3.0 EPSF-3.0\n";
-            eps += `%%BoundingBox: 0 0 ${width} ${height}\n`;
-            eps += "%%LanguageLevel: 2\n";
-            eps += "%%EndComments\n";
-            eps += "gsave\n";
-            eps += `${width} ${height} scale\n`;
-            eps += "/DeviceRGB setcolorspace\n";
-            eps += "<<\n";
-            eps += "  /ImageType 1\n";
-            eps += `  /Width ${width}\n`;
-            eps += `  /Height ${height}\n`;
-            eps += "  /BitsPerComponent 8\n";
-            eps += "  /Decode [0 1 0 1 0 1]\n";
-            eps += `  /ImageMatrix [${width} 0 0 -${height} 0 ${height}]\n`;
-            eps += "  /DataSource currentfile /ASCIIHexDecode filter\n";
-            eps += ">>\n";
-            eps += "image\n";
+            const parts = [];
+            parts.push("%!PS-Adobe-3.0 EPSF-3.0\n");
+            parts.push(`%%BoundingBox: 0 0 ${width} ${height}\n`);
+            parts.push("%%LanguageLevel: 2\n");
+            parts.push("%%EndComments\n");
+            parts.push("gsave\n");
+            parts.push(`${width} ${height} scale\n`);
+            parts.push("/DeviceRGB setcolorspace\n");
+            parts.push("<<\n");
+            parts.push("  /ImageType 1\n");
+            parts.push(`  /Width ${width}\n`);
+            parts.push(`  /Height ${height}\n`);
+            parts.push("  /BitsPerComponent 8\n");
+            parts.push("  /Decode [0 1 0 1 0 1]\n");
+            parts.push(`  /ImageMatrix [${width} 0 0 -${height} 0 ${height}]\n`);
+            parts.push("  /DataSource currentfile /ASCIIHexDecode filter\n");
+            parts.push(">>\n");
+            parts.push("image\n");
 
             const hexArray = [];
             let currentLine = "";
             for (let i = 0; i < imgData.length; i += 4) {
-                currentLine += imgData[i].toString(16).padStart(2, '0') +
-                               imgData[i+1].toString(16).padStart(2, '0') +
-                               imgData[i+2].toString(16).padStart(2, '0');
-                if (currentLine.length >= 72) {
+                const byteHex = imgData[i].toString(16).padStart(2, '0') +
+                                imgData[i+1].toString(16).padStart(2, '0') +
+                                imgData[i+2].toString(16).padStart(2, '0');
+                if (currentLine.length + byteHex.length > 72) {
                     hexArray.push(currentLine);
                     currentLine = "";
                 }
+                currentLine = currentLine + byteHex;
             }
             if (currentLine.length > 0) {
                 hexArray.push(currentLine);
             }
 
-            eps += hexArray.join("\n") + "\n>\n";
-            eps += "grestore\n";
-            eps += "%%EOF\n";
+            parts.push(hexArray.join("\n") + "\n>\n");
+            parts.push("grestore\n");
+            parts.push("%%EOF\n");
 
-            return new Blob([eps], { type: "application/postscript" });
+            return new Blob([parts.join("")], { type: "application/postscript" });
         }
 
         function getExtension(mimeType) {
@@ -634,14 +669,19 @@
             try {
                 let currentFile = data.file;
                 const fileNameLower = currentFile.name.toLowerCase();
-                const baseFileName = currentFile.name.substring(0, currentFile.name.lastIndexOf('.')) || currentFile.name;
+                const dot = currentFile.name.lastIndexOf('.');
+                const baseFileName = dot > 0 ? currentFile.name.substring(0, dot) : currentFile.name;
                 const qualityValue = parseInt(qualityRange.value) / 100;
                 
                 const rw = document.getElementById('resizeWidth').value;
                 const rh = document.getElementById('resizeHeight').value;
 
                 if (fileNameLower.endsWith('.heic') || fileNameLower.endsWith('.heif')) {
-                    const convertedBlob = await heic2any({ blob: currentFile, toType: "image/jpeg", quality: qualityValue });
+                    const arr = await heic2any({ blob: currentFile, toType: "image/jpeg", quality: qualityValue });
+                    const convertedBlob = arr[0];
+                    if (arr.length > 1) {
+                        console.warn(`HEICには${arr.length}枚のフレームが含まれていましたが、1枚目のみ変換します`);
+                    }
                     currentFile = new File([convertedBlob], "temp.jpg", { type: "image/jpeg" });
                 }
 
@@ -666,9 +706,20 @@
                                 }
                             }
 
+                            const MAX_CANVAS_DIM = 16384;
+                            if (!Number.isFinite(targetWidth) || !Number.isFinite(targetHeight) || targetWidth <= 0 || targetHeight <= 0) {
+                                return finalize(null, '無効なサイズです（リサイズ値を確認してください）');
+                            }
+                            if (targetWidth > MAX_CANVAS_DIM || targetHeight > MAX_CANVAS_DIM) {
+                                return finalize(null, `サイズが大きすぎます（最大${MAX_CANVAS_DIM}px）`);
+                            }
+
                             const canvas = document.createElement('canvas');
                             canvas.width = targetWidth;
                             canvas.height = targetHeight;
+                            if (canvas.width === 0 || canvas.height === 0) {
+                                return finalize(null, 'キャンバスを初期化できませんでした（サイズが大きすぎます）');
+                            }
                             const ctx = canvas.getContext('2d');
 
                             if (['image/jpeg', 'image/jpeg_ext', 'image/bmp', 'application/pdf', 'application/postscript'].includes(data.targetFormat)) {
@@ -677,13 +728,23 @@
                             }
                             ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-                            const finalize = (blob) => {
+                            const finalize = (blob, errorMsg) => {
                                 if (!blob) {
                                     data.status = 'error';
+                                    data.errorMsg = errorMsg || '変換に失敗しました';
                                 } else {
                                     data.status = 'done';
+                                    data.errorMsg = null;
                                     data.downloadUrl = URL.createObjectURL(blob);
-                                    data.downloadName = baseFileName + '.' + getExtension(data.targetFormat);
+                                    const ext = getExtension(data.targetFormat);
+                                    let name = baseFileName + '.' + ext;
+                                    const existingNames = new Set(filesData.map(f => f.downloadName).filter(n => n));
+                                    let suffix = 1;
+                                    while (existingNames.has(name)) {
+                                        name = `${baseFileName}_${suffix}.${ext}`;
+                                        suffix++;
+                                    }
+                                    data.downloadName = name;
                                 }
                                 resolve();
                             };
@@ -706,10 +767,10 @@
                                 finalize(pdf.output('blob'));
                             } else {
                                 const exportFormat = data.targetFormat === 'image/jpeg_ext' ? 'image/jpeg' : data.targetFormat;
-                                canvas.toBlob(blob => finalize(blob), exportFormat, qualityValue);
+                                canvas.toBlob(blob => finalize(blob, !blob ? 'この形式への書き出しがサポートされていません' : null), exportFormat, qualityValue);
                             }
                         };
-                        img.onerror = reject;
+                        img.onerror = () => reject(new Error('Failed to decode image'));
                         img.src = e.target.result;
                     };
                     reader.onerror = reject;
@@ -718,6 +779,7 @@
             } catch (error) {
                 console.error(error);
                 data.status = 'error';
+                data.errorMsg = error && error.message ? error.message : String(error);
             }
         }
 
