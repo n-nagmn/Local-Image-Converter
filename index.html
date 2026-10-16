@@ -499,7 +499,7 @@
             const ctx = canvas.getContext("2d");
             const imageData = ctx.getImageData(0, 0, width, height);
             const data = imageData.data;
-            const rowSize = Math.floor((24 * width + 31) / 32) * 4;
+            const rowSize = Math.ceil((width * 3) / 4) * 4;
             const pixelArraySize = rowSize * height;
             const fileSize = 54 + pixelArraySize;
             const buffer = new ArrayBuffer(fileSize);
