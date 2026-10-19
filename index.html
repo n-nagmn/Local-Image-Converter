@@ -463,7 +463,18 @@
         function changeAllFormats(format) {
             if (!format) return;
             filesData.forEach(f => {
-                if(f.status === 'ready') f.targetFormat = format;
+                if (f.status === 'ready' || f.status === 'done' || f.status === 'error') {
+                    if (f.status === 'done' || f.status === 'error') {
+                        f.status = 'ready';
+                        f.errorMsg = null;
+                        if (f.downloadUrl) {
+                            URL.revokeObjectURL(f.downloadUrl);
+                            f.downloadUrl = null;
+                            f.downloadName = '';
+                        }
+                    }
+                    f.targetFormat = format;
+                }
             });
             renderFileList();
         }
@@ -640,7 +651,7 @@
                 const byteHex = imgData[i].toString(16).padStart(2, '0') +
                                 imgData[i+1].toString(16).padStart(2, '0') +
                                 imgData[i+2].toString(16).padStart(2, '0');
-                if (currentLine.length > 66) {
+                if (currentLine.length >= 66) {
                     hexArray.push(currentLine);
                     currentLine = "";
                 }
@@ -746,6 +757,10 @@
                             if (targetWidth > MAX_CANVAS_DIM || targetHeight > MAX_CANVAS_DIM) {
                                 return finalize(null, `サイズが大きすぎます（最大${MAX_CANVAS_DIM}px）`);
                             }
+                            const MAX_PIXELS = 50000000;
+                            if (targetWidth * targetHeight > MAX_PIXELS) {
+                                return finalize(null, '画像が大きすぎます');
+                            }
 
                             const canvas = document.createElement('canvas');
                             canvas.width = targetWidth;
@@ -774,19 +789,28 @@
                             } else if (data.targetFormat === 'application/pdf') {
                                 const { jsPDF } = window.jspdf;
                                 const isLandscape = targetWidth > targetHeight;
-                                const pageWidthMm = isLandscape ? 297 : 210;
-                                const pageHeightMm = isLandscape ? 210 : 297;
+                                const MARGIN_MM = 10;
+                                let pageWidthMm, pageHeightMm;
+                                if (isLandscape) {
+                                    pageHeightMm = 210;
+                                    pageWidthMm = Math.min(210 * targetWidth / targetHeight, 297);
+                                } else {
+                                    pageWidthMm = 210;
+                                    pageHeightMm = Math.min(210 * targetHeight / targetWidth, 297);
+                                }
                                 const pdf = new jsPDF({
                                     orientation: isLandscape ? 'l' : 'p',
                                     unit: 'mm',
                                     format: [pageWidthMm, pageHeightMm]
                                 });
                                 const imgData = canvas.toDataURL('image/jpeg', qualityValue);
-                                const scale = Math.min(pageWidthMm / targetWidth, pageHeightMm / targetHeight);
+                                const availWidthMm = Math.max(pageWidthMm - 2 * MARGIN_MM, 1);
+                                const availHeightMm = Math.max(pageHeightMm - 2 * MARGIN_MM, 1);
+                                const scale = Math.min(availWidthMm / targetWidth, availHeightMm / targetHeight);
                                 const imgWidthMm = targetWidth * scale;
                                 const imgHeightMm = targetHeight * scale;
-                                const posX = (pageWidthMm - imgWidthMm) / 2;
-                                const posY = (pageHeightMm - imgHeightMm) / 2;
+                                const posX = MARGIN_MM + (availWidthMm - imgWidthMm) / 2;
+                                const posY = MARGIN_MM + (availHeightMm - imgHeightMm) / 2;
                                 pdf.addImage(imgData, 'JPEG', posX, posY, imgWidthMm, imgHeightMm);
                                 finalize(pdf.output('blob'));
                             } else {
@@ -799,6 +823,10 @@
                     };
                     reader.onerror = reject;
                     reader.readAsDataURL(currentFile);
+                }).catch(error => {
+                    console.error(error);
+                    data.status = 'error';
+                    data.errorMsg = error && error.message ? error.message : String(error);
                 });
             } catch (error) {
                 console.error(error);
@@ -814,13 +842,17 @@
             convertBtn.disabled = true;
             convertBtn.textContent = '処理中...';
 
-            for (const data of pendingFiles) {
-                await processFile(data);
-                renderFileList();
+            try {
+                for (const data of pendingFiles) {
+                    await processFile(data);
+                    renderFileList();
+                }
+            } catch (error) {
+                console.error(error);
+            } finally {
+                convertBtn.disabled = false;
+                convertBtn.textContent = '変換 →';
             }
-
-            convertBtn.disabled = false;
-            convertBtn.textContent = '変換 →';
         });
     </script>
 </body>
