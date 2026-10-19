@@ -332,6 +332,13 @@
             qualityDisplay.textContent = e.target.value;
         });
 
+        document.getElementById('resizeWidth').addEventListener('input', function () {
+            this.valueAsNumber = Number.isFinite(this.valueAsNumber) ? Math.max(1, Math.min(16384, this.valueAsNumber)) : 0;
+        });
+        document.getElementById('resizeHeight').addEventListener('input', function () {
+            this.valueAsNumber = Number.isFinite(this.valueAsNumber) ? Math.max(1, Math.min(16384, this.valueAsNumber)) : 0;
+        });
+
         window.addEventListener('dragenter', e => {
             e.preventDefault();
         });
@@ -411,7 +418,7 @@
         }
 
         function handleFiles(newFiles) {
-            if (newFiles.length === 0) return;
+            if (!newFiles || newFiles.length === 0) return;
             
             emptyState.style.display = 'none';
             fileListContainer.style.display = 'flex';
@@ -424,7 +431,7 @@
                 }
                 const id = 'f_' + Math.random().toString(36).substr(2, 9);
                 let thumbUrl = '';
-                if(file.type.startsWith('image/')) {
+                if (file.type && file.type.startsWith('image/')) {
                     thumbUrl = URL.createObjectURL(file);
                 }
                 
@@ -651,7 +658,7 @@
                 const byteHex = imgData[i].toString(16).padStart(2, '0') +
                                 imgData[i+1].toString(16).padStart(2, '0') +
                                 imgData[i+2].toString(16).padStart(2, '0');
-                if (currentLine.length >= 66) {
+                if (currentLine.length > 0 && currentLine.length + byteHex.length > 72) {
                     hexArray.push(currentLine);
                     currentLine = "";
                 }
@@ -700,8 +707,14 @@
                 const rh = document.getElementById('resizeHeight').value;
 
                 if (fileNameLower.endsWith('.heic') || fileNameLower.endsWith('.heif')) {
+                    if (typeof heic2any !== 'function') {
+                        throw new Error('HEIC変換ライブラリが読み込めませんでした。インターネット接続を確認してください');
+                    }
                     const arr = await heic2any({ blob: currentFile, toType: "image/jpeg", quality: qualityValue });
-                    const convertedBlob = arr[0];
+                    const convertedBlob = arr && arr[0];
+                    if (!convertedBlob) {
+                        throw new Error('HEICのデコードに失敗しました');
+                    }
                     if (arr.length > 1) {
                         console.warn(`HEICには${arr.length}枚のフレームが含まれていましたが、1枚目のみ変換します`);
                     }
@@ -769,6 +782,9 @@
                                 return finalize(null, 'キャンバスを初期化できませんでした（サイズが大きすぎます）');
                             }
                             const ctx = canvas.getContext('2d');
+                            if (!ctx) {
+                                return finalize(null, 'キャンバスコンテキストを取得できませんでした（メモリ不足またはサイズが大きすぎます）');
+                            }
 
                             if (['image/jpeg', 'image/jpeg_ext', 'image/bmp', 'application/pdf', 'application/postscript'].includes(data.targetFormat)) {
                                 ctx.fillStyle = '#FFFFFF';
@@ -818,7 +834,7 @@
                                 canvas.toBlob(blob => finalize(blob, !blob ? 'この形式への書き出しがサポートされていません' : null), exportFormat, qualityValue);
                             }
                         };
-                        img.onerror = () => reject(new Error('Failed to decode image'));
+                        img.onerror = () => reject(new Error('画像のデコードに失敗しました（破損しているかサポートされていない形式です）'));
                         img.src = e.target.result;
                     };
                     reader.onerror = reject;
