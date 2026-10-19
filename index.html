@@ -470,7 +470,18 @@
 
         function updateFileFormat(id, format) {
             const fileObj = filesData.find(f => f.id === id);
-            if (fileObj) fileObj.targetFormat = format;
+            if (!fileObj) return;
+            if (fileObj.status === 'done' || fileObj.status === 'error') {
+                fileObj.status = 'ready';
+                fileObj.errorMsg = null;
+                if (fileObj.downloadUrl) {
+                    URL.revokeObjectURL(fileObj.downloadUrl);
+                    fileObj.downloadUrl = null;
+                    fileObj.downloadName = '';
+                }
+            }
+            fileObj.targetFormat = format;
+            renderFileList();
         }
 
         function renderFileList() {
@@ -500,7 +511,7 @@
                     <div class="file-icon-box" style="${thumbStyle}">${thumbContent}</div>
                     <div class="file-name" title="${esc(data.file.name)}">${esc(data.file.name)}</div>
                     <div class="file-to-text">に</div>
-                    <select class="format-select" onchange="updateFileFormat('${data.id}', this.value)" ${data.status !== 'ready' ? 'disabled' : ''}>
+                    <select class="format-select" onchange="updateFileFormat('${data.id}', this.value)" ${data.status === 'converting' ? 'disabled' : ''}>
                         <option value="image/jpeg" ${data.targetFormat === 'image/jpeg' ? 'selected' : ''}>JPG</option>
                         <option value="image/jpeg_ext" ${data.targetFormat === 'image/jpeg_ext' ? 'selected' : ''}>JPEG</option>
                         <option value="image/png" ${data.targetFormat === 'image/png' ? 'selected' : ''}>PNG</option>
@@ -629,7 +640,7 @@
                 const byteHex = imgData[i].toString(16).padStart(2, '0') +
                                 imgData[i+1].toString(16).padStart(2, '0') +
                                 imgData[i+2].toString(16).padStart(2, '0');
-                if (currentLine.length + byteHex.length > 72) {
+                if (currentLine.length > 66) {
                     hexArray.push(currentLine);
                     currentLine = "";
                 }
@@ -663,6 +674,7 @@
         }
 
         async function processFile(data) {
+            data.downloadName = '';
             data.status = 'converting';
             renderFileList();
 
@@ -690,6 +702,27 @@
                     reader.onload = e => {
                         const img = new Image();
                         img.onload = async () => {
+                            const finalize = (blob, errorMsg) => {
+                                if (!blob) {
+                                    data.status = 'error';
+                                    data.errorMsg = errorMsg || '変換に失敗しました';
+                                } else {
+                                    data.status = 'done';
+                                    data.errorMsg = null;
+                                    data.downloadUrl = URL.createObjectURL(blob);
+                                    const ext = getExtension(data.targetFormat);
+                                    let name = baseFileName + '.' + ext;
+                                    const existingNames = new Set(filesData.map(f => f.downloadName).filter(n => n));
+                                    let suffix = 1;
+                                    while (existingNames.has(name)) {
+                                        name = `${baseFileName}_${suffix}.${ext}`;
+                                        suffix++;
+                                    }
+                                    data.downloadName = name;
+                                }
+                                resolve();
+                            };
+
                             let targetWidth = img.width;
                             let targetHeight = img.height;
                             
@@ -728,42 +761,33 @@
                             }
                             ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
 
-                            const finalize = (blob, errorMsg) => {
-                                if (!blob) {
-                                    data.status = 'error';
-                                    data.errorMsg = errorMsg || '変換に失敗しました';
-                                } else {
-                                    data.status = 'done';
-                                    data.errorMsg = null;
-                                    data.downloadUrl = URL.createObjectURL(blob);
-                                    const ext = getExtension(data.targetFormat);
-                                    let name = baseFileName + '.' + ext;
-                                    const existingNames = new Set(filesData.map(f => f.downloadName).filter(n => n));
-                                    let suffix = 1;
-                                    while (existingNames.has(name)) {
-                                        name = `${baseFileName}_${suffix}.${ext}`;
-                                        suffix++;
-                                    }
-                                    data.downloadName = name;
-                                }
-                                resolve();
-                            };
-
                             if (data.targetFormat === 'image/bmp') {
                                 finalize(encodeBMP(canvas));
                             } else if (data.targetFormat === 'image/x-icon') {
-                                finalize(await encodeICO(canvas));
+                                try {
+                                    finalize(await encodeICO(canvas));
+                                } catch (err) {
+                                    finalize(null, err.message);
+                                }
                             } else if (data.targetFormat === 'application/postscript') {
                                 finalize(encodeEPS(canvas));
                             } else if (data.targetFormat === 'application/pdf') {
                                 const { jsPDF } = window.jspdf;
+                                const isLandscape = targetWidth > targetHeight;
+                                const pageWidthMm = isLandscape ? 297 : 210;
+                                const pageHeightMm = isLandscape ? 210 : 297;
                                 const pdf = new jsPDF({
-                                    orientation: targetWidth > targetHeight ? 'l' : 'p',
-                                    unit: 'px',
-                                    format: [targetWidth, targetHeight]
+                                    orientation: isLandscape ? 'l' : 'p',
+                                    unit: 'mm',
+                                    format: [pageWidthMm, pageHeightMm]
                                 });
                                 const imgData = canvas.toDataURL('image/jpeg', qualityValue);
-                                pdf.addImage(imgData, 'JPEG', 0, 0, targetWidth, targetHeight);
+                                const scale = Math.min(pageWidthMm / targetWidth, pageHeightMm / targetHeight);
+                                const imgWidthMm = targetWidth * scale;
+                                const imgHeightMm = targetHeight * scale;
+                                const posX = (pageWidthMm - imgWidthMm) / 2;
+                                const posY = (pageHeightMm - imgHeightMm) / 2;
+                                pdf.addImage(imgData, 'JPEG', posX, posY, imgWidthMm, imgHeightMm);
                                 finalize(pdf.output('blob'));
                             } else {
                                 const exportFormat = data.targetFormat === 'image/jpeg_ext' ? 'image/jpeg' : data.targetFormat;
